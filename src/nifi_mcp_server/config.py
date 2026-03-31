@@ -33,6 +33,14 @@ class ServerConfig:
 	max_retries: int = int(os.getenv("HTTP_MAX_RETRIES", "3"))
 	rate_limit_rps: float = float(os.getenv("HTTP_RATE_LIMIT_RPS", "5"))
 
+	# Client certificate auth (mTLS)
+	# Option 1: PKCS#12 bundle (preferred)
+	nifi_client_p12: Optional[str] = os.getenv("NIFI_CLIENT_P12")
+	nifi_client_p12_password: Optional[str] = os.getenv("NIFI_CLIENT_P12_PASSWORD")
+	# Option 2: PEM files (alternative to P12)
+	nifi_client_cert: Optional[str] = os.getenv("NIFI_CLIENT_CERT")
+	nifi_client_key: Optional[str] = os.getenv("NIFI_CLIENT_KEY")
+
 	# Behavior
 	readonly: bool = os.getenv("NIFI_READONLY", "true").lower() == "true"
 	allowed_actions_csv: str = os.getenv("NIFI_ALLOWED_ACTIONS", "")

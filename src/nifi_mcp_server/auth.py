@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import atexit
 import base64
-from typing import Optional
+import os
+import tempfile
+from typing import Optional, Tuple
 
 import requests
 
@@ -17,6 +20,10 @@ class KnoxAuthFactory:
 		token_endpoint: Optional[str],
 		passcode_token: Optional[str],
 		verify: bool | str,
+		p12_path: Optional[str] = None,
+		p12_password: Optional[str] = None,
+		client_cert: Optional[str] = None,
+		client_key: Optional[str] = None,
 	):
 		self.gateway_url = gateway_url.rstrip("/") if gateway_url else ""
 		self.token = token
@@ -28,10 +35,65 @@ class KnoxAuthFactory:
 		)
 		self.passcode_token = passcode_token
 		self.verify = verify
+		self.p12_path = p12_path
+		self.p12_password = p12_password
+		self.client_cert = client_cert
+		self.client_key = client_key
+		self._tmp_files: list[str] = []
+
+	def _resolve_client_cert(self) -> Optional[Tuple[str, str]]:
+		"""Return (cert_path, key_path) for requests session.cert, or None."""
+		if self.p12_path:
+			return self._extract_p12()
+		if self.client_cert and self.client_key:
+			return (self.client_cert, self.client_key)
+		return None
+
+	def _extract_p12(self) -> Tuple[str, str]:
+		"""Extract cert and key from a PKCS#12 file into temp PEM files."""
+		try:
+			from cryptography.hazmat.primitives.serialization import pkcs12, Encoding, PrivateFormat, NoEncryption
+		except ImportError:
+			raise RuntimeError("cryptography package is required for P12 auth: pip install cryptography")
+
+		password_bytes = self.p12_password.encode() if self.p12_password else None
+		with open(self.p12_path, "rb") as f:
+			p12_data = f.read()
+
+		private_key, certificate, _ = pkcs12.load_key_and_certificates(p12_data, password_bytes)
+
+		cert_pem = certificate.public_bytes(Encoding.PEM)
+		key_pem = private_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
+
+		cert_file = tempfile.NamedTemporaryFile(suffix=".crt", delete=False)
+		cert_file.write(cert_pem)
+		cert_file.flush()
+		cert_file.close()
+
+		key_file = tempfile.NamedTemporaryFile(suffix=".key", delete=False)
+		key_file.write(key_pem)
+		key_file.flush()
+		key_file.close()
+
+		self._tmp_files.extend([cert_file.name, key_file.name])
+		atexit.register(self._cleanup_tmp_files)
+
+		return (cert_file.name, key_file.name)
+
+	def _cleanup_tmp_files(self) -> None:
+		for path in self._tmp_files:
+			try:
+				os.unlink(path)
+			except OSError:
+				pass
 
 	def build_session(self) -> requests.Session:
 		session = requests.Session()
 		session.verify = self.verify
+
+		client_cert = self._resolve_client_cert()
+		if client_cert:
+			session.cert = client_cert
 
 		# Priority: Explicit Cookie -> Knox token (as cookie for CDP) -> Passcode token -> Basic creds token exchange
 		if self.cookie:

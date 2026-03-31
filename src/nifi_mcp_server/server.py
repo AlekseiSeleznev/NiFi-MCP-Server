@@ -56,6 +56,10 @@ def build_client(config: ServerConfig) -> NiFiClient:
 		token_endpoint=config.knox_token_endpoint,
 		passcode_token=config.knox_passcode_token,
 		verify=verify,
+		p12_path=config.nifi_client_p12,
+		p12_password=config.nifi_client_p12_password,
+		client_cert=config.nifi_client_cert,
+		client_key=config.nifi_client_key,
 	)
 	session = auth.build_session()
 	return NiFiClient(
