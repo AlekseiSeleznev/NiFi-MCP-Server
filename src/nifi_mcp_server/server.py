@@ -44,6 +44,22 @@ def _redact_sensitive(obj: Any, max_items: int = 200) -> Any:
 	return obj
 
 
+class _LazyNiFiClient:
+	"""Proxy that defers NiFiClient creation until the first attribute access."""
+
+	def __init__(self, config: ServerConfig) -> None:
+		self._config = config
+		self._client: Optional[NiFiClient] = None
+
+	def _get(self) -> NiFiClient:
+		if self._client is None:
+			self._client = build_client(self._config)
+		return self._client
+
+	def __getattr__(self, name: str):
+		return getattr(self._get(), name)
+
+
 def build_client(config: ServerConfig) -> NiFiClient:
 	verify = config.build_verify()
 	nifi_base = config.build_nifi_base()
@@ -746,7 +762,7 @@ def create_server(nifi: NiFiClient, readonly: bool) -> FastMCP:
 async def run_stdio() -> None:
 	# For FastMCP, prefer the built-in stdio runner
 	config = ServerConfig()
-	nifi = build_client(config)
+	nifi = _LazyNiFiClient(config)
 	server = create_server(nifi, readonly=config.readonly)
 	# run() is synchronous; call the async flavor directly
 	await server.run_stdio_async()
@@ -757,7 +773,7 @@ def main() -> None:
 	if transport != "stdio":
 		# Defer to FastMCP synchronous run helper for other transports when added
 		config = ServerConfig()
-		nifi = build_client(config)
+		nifi = _LazyNiFiClient(config)
 		server = create_server(nifi, readonly=config.readonly)
 		server.run(transport=transport)
 		return
